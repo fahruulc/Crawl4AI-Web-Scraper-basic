@@ -1,0 +1,21 @@
+{
+  "name": "job",
+  "baseSelector": "div.card",
+  "fields": [
+    {
+      "name": "job_name",
+      "selector": "h2.title",
+      "type": "text"
+    },
+    {
+      "name": "company",
+      "selector": "h3.company",
+      "type": "text"
+    },
+    {
+      "name": "location",
+      "selector": "p.location",
+      "type": "text"
+    }
+  ]
+}

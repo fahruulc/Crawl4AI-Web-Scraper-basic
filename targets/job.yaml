@@ -1,0 +1,8 @@
+name: job
+start_urls:
+  - "https://realpython.github.io/fake-jobs/"
+mode: css
+schema_file: schemas/job.json
+rate_limit_seconds: 2
+scroll_full_page: false
+max_pages: 1

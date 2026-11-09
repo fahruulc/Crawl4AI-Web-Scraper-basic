@@ -1,0 +1,8 @@
+name: ecommerce_demo
+start_urls:
+  - "https://webscraper.io/test-sites/e-commerce/static/computers/laptops"
+mode: css
+schema_file: schemas/ecommerce_demo.json
+rate_limit_seconds: 2
+scroll_full_page: false
+max_pages: 1

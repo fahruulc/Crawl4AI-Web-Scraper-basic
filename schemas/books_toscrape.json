@@ -1,0 +1,23 @@
+{
+  "name": "books_toscrape_catalog",
+  "baseSelector": "article.product_pod",
+  "fields": [
+    {
+      "name": "name",
+      "selector": "h3 a",
+      "type": "attribute",
+      "attribute": "title"
+    },
+    {
+      "name": "price",
+      "selector": "p.price_color",
+      "type": "text"
+    },
+    {
+      "name": "stock",
+      "selector": "p.instock.availability",
+      "type": "text"
+    }
+  ]
+}
+

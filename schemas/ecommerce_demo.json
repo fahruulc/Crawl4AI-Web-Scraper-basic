@@ -1,0 +1,22 @@
+{
+  "name": "ecommerce_demo_catalog",
+  "baseSelector": "div.thumbnail",
+  "fields": [
+    {
+      "name": "name",
+      "selector": "a.title",
+      "type": "attribute",
+      "attribute": "title"
+    },
+    {
+      "name": "price",
+      "selector": "h4.price",
+      "type": "text"
+    },
+    {
+      "name": "stock",
+      "selector": "p.review-count",
+      "type": "text"
+    }
+  ]
+}

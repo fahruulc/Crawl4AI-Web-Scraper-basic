@@ -1,0 +1,13 @@
+# Template konfigurasi target scraper
+name: target_name
+start_urls:
+  - "https://contoh-situs-latihan.example/katalog"
+mode: css            # css | llm
+schema_file: schemas/target_name.json    # dipakai jika mode=css
+llm:                                    # dipakai jika mode=llm
+  provider: "gemini/gemini-2.0-flash"
+  instruction: "Ekstrak nama produk, harga, dan stok."
+rate_limit_seconds: 2
+scroll_full_page: false
+max_pages: 5
+
