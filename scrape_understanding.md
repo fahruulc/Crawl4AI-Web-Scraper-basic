@@ -1,52 +1,57 @@
-# 🕷️ Panduan Komprehensif Arsitektur & Bedah Codebase Scraper (Crawl4AI)
+# 🕷️ Dokumentasi Teknis & Arsitektur Codebase Web Scraper (Crawl4AI)
 
-> **Dokumen Panduan & Materi Video**: Dibuat khusus untuk memahami alur kerja, dataflow, arsitektur *config-driven*, dan konsep di balik codebase scraper Crawl4AI agar siap dipresentasikan dalam video edukasi tingkat tinggi.
+> **Dokumentasi Teknis Sistem**: Penjelasan komprehensif mengenai arsitektur *config-driven*, peranan detail library Crawl4AI dalam sistem, aliran transformasi data di setiap stage (disertai contoh input-output konkret), hingga mekanisme penyimpanan idempotensi pada database SQLite.
 
 ---
 
 ## 📑 Daftar Isi
-1. [Filosofi Arsitektur: Mengapa Codebase Ini Spesial?](#1-filosofi-arsitektur-mengapa-codebase-ini-spesial)
+1. [Filosofi Arsitektur: Config-Driven Scraping](#1-filosofi-arsitektur-config-driven-scraping)
 2. [Peta Struktur File & Direktori](#2-peta-struktur-file--direktori)
 3. [Bedah File demi File (Deep Dive)](#3-bedah-file-demi-file-deep-dive)
    - [A. targets/*.yaml (Definisi Target)](#a-targetsyaml-definisi-target)
    - [B. schemas/*.json (Deklarasi Selektor)](#b-schemasjson-deklarasi-selektor)
-   - [C. src/config.py (Validasi Konfigurasi)](#c-srcconfigpy-validasi-konfigurasi)
-   - [D. src/extract_css.py (Jantung Crawl4AI)](#d-srcextract_csspy-jantung-crawl4ai)
-   - [E. src/validate.py (Pembersihan & Validasi Data)](#e-srcvalidatepy-pembersihan--validasi-data)
+   - [C. src/config.py (Validasi Konfigurasi Target)](#c-srcconfigpy-validasi-konfigurasi-target)
+   - [D. src/extract_css.py (Integrasi Crawl4AI)](#d-srcextract_csspy-integrasi-crawl4ai)
+   - [E. src/validate.py (Pembersihan & Validasi Tipe Data)](#e-srcvalidatepy-pembersihan--validasi-tipe-data)
    - [F. src/storage.py (Database, Idempotensi & Riwayat Harga)](#f-srcstoragepy-database-idempotensi--riwayat-harga)
-   - [G. src/runner.py (Konduktor & CLI Pipeline)](#g-srcrunnerpy-konduktor--cli-pipeline)
-4. [Diagram Workflow & Dataflow](#4-diagram-workflow--dataflow)
-5. [Fitur Unggulan "Engineering-Grade" untuk Highlight Video](#5-fitur-unggulan-engineering-grade-untuk-highlight-video)
-6. [Blueprint Struktur Konten Video (Script Outline)](#6-blueprint-struktur-konten-video-script-outline)
-7. [Cheatsheet Perintah Demo & Live Query Database](#7-cheatsheet-perintah-demo--live-query-database)
+   - [G. src/runner.py (CLI Orchestrator Pipeline)](#g-srcrunnerpy-cli-orchestrator-pipeline)
+4. [Peranan Mendalam Crawl4AI & Transformasi Data Tiap Stage](#4-peranan-mendalam-crawl4ai--transformasi-data-tiap-stage)
+   - [Stage 1: Lifecycle & Inisialisasi Engine Headless](#stage-1-lifecycle--inisialisasi-engine-headless)
+   - [Stage 2: Navigasi, Evaluasi JavaScript & Rendering Halaman](#stage-2-navigasi-evaluasi-javascript--rendering-halaman)
+   - [Stage 3: Ekstraksi Data Deklaratif (JsonCssExtractionStrategy)](#stage-3-ekstraksi-data-deklaratif-jsoncssextractionstrategy)
+   - [Stage 4: Serialisasi Data Mentah & Parsing JSON](#stage-4-serialisasi-data-mentah--parsing-json)
+   - [Stage 5: Pasca-Crawl4AI — Sanitasi & Pemodelan Data (Pydantic)](#stage-5-pasca-crawl4ai--sanitasi--pemodelan-data-pydantic)
+   - [Stage 6: Pasca-Crawl4AI — Persistensi Idempotent & Price Tracking](#stage-6-pasca-crawl4ai--persistensi-idempotent--price-tracking)
+5. [Diagram Arsitektur Workflow & Dataflow](#5-diagram-arsitektur-workflow--dataflow)
+6. [Karakteristik & Fitur Unggulan Sistem](#6-karakteristik--fitur-unggulan-sistem)
+7. [Panduan Operasional CLI & Verifikasi Database](#7-panduan-operasional-cli--verifikasi-database)
+8. [Pengujian Otomatis Offline (Automated Testing)](#8-pengujian-otomatis-offline-automated-testing)
 
 ---
 
-## 1. Filosofi Arsitektur: Mengapa Codebase Ini Spesial?
+## 1. Filosofi Arsitektur: Config-Driven Scraping
 
-Kebanyakan tutorial web scraping pemula di YouTube mengajarkan cara seperti ini:
+Pada arsitektur scraper konvensional, URL website, selector CSS, pembersihan data, dan operasi database sering kali dicampur menjadi satu skrip monolitik:
 ```python
-# ❌ Pola Pemula (Spaghetti & Hardcoded)
+# ❌ Pendekatan Monolitik & Rawan Pecah
 response = requests.get("https://contoh-toko.com")
 soup = BeautifulSoup(response.text, "html.parser")
 for item in soup.find_all("div", class_="card"):
-    print(item.find("h2").text)
+    db.execute("INSERT INTO products VALUES (?)", (item.find("h2").text,))
 ```
-**Kelemahan pola pemula:**
-1. **Terkunci ke 1 website**: Mau scrape web kedua? Harus buat file python baru lagi atau copy-paste kode.
-2. **Mudah hancur**: Bila web menggunakan JavaScript/SPA (React/Vue), `requests` gagal karena tidak mengeksekusi JS.
-3. **Kotor & Duplikat**: Kalau dijalankan 2x, data masuk dobel ke database.
-4. **Sulit diuji**: Pengujian butuh koneksi internet hidup setiap saat.
+Kelemahan pendekatan monolitik:
+1. **Coupling Tinggi**: Menambah atau mengganti target website mengharuskan penulisan ulang skrip Python baru.
+2. **Keterbatasan JavaScript**: Skrip HTTP client sederhana tidak mengeksekusi JavaScript/SPA sehingga gagal mengekstrak situs dinamis.
+3. **Data Duplikat**: Tidak adanya penanganan idempotensi mengakibatkan data ganda saat dieksekusi berulang.
+4. **Dependensi Jaringan pada Pengujian**: Unit test tidak dapat berjalan tanpa koneksi internet aktif.
 
-### Solusi Codebase Ini: *Config-Driven Architecture* (Satu Mesin, Banyak Target)
-Codebase Anda mengadopsi standar software engineering tingkat lanjut:
-- **`src/` adalah Mesin Universal (Engine)**: Kode di `src/` sama sekali **tidak mengenal nama website**, URL, ataupun class CSS tertentu.
-- **Konfigurasi Dipisah Total**:
-  - Apa yang mau di-scrape dan batas halamannya? Ditulis di `targets/<nama>.yaml`.
-  - Di mana letak elemen HTML-nya? Dideklarasikan di `schemas/<nama>.json`.
-- **Ekstraksi Modern dengan Crawl4AI**: Memanfaatkan headless browser (Playwright/Chromium) yang mengeksekusi JavaScript secara asinkron (`asyncio`).
-- **Data Validation & Sanitization**: Menggunakan Pydantic untuk parsing otomatis (misal: `"£51.77"` diubah jadi float `51.77`).
-- **Smart Idempotent Storage**: Menjalankan scraper 100 kali tidak akan menggandakan data. Jika harga berubah, sistem otomatis mencatat riwayat perubahannya (*price history tracking*).
+### Solusi: Arsitektur Berbasis Konfigurasi (*Config-Driven*)
+Codebase ini memisahkan secara tegas antara **mesin komputasi** dan **konfigurasi target**:
+- **Mesin Universal (`src/`)**: Seluruh modul Python di direktori `src/` bersifat agnostik terhadap target. Mesin tidak mengetahui domain URL maupun nama class CSS spesifik dari website mana pun.
+- **Konfigurasi Misi (`targets/*.yaml`)**: Menentukan URL target, mode ekstraksi, batasan laju (*rate limiting*), dan kuota halaman.
+- **Aturan Ekstraksi (`schemas/*.json`)**: Menentukan pemetaan selektor CSS deklaratif untuk Crawl4AI.
+- **Ekstraksi Asinkron Berbasis Browser**: Menggunakan headless Chromium (via Playwright) yang dikendalikan oleh Crawl4AI untuk me-render konten dinamis.
+- **Sanitasi Ketat & Idempotensi**: Validasi tipe data menggunakan Pydantic serta penyimpanan pintar di SQLite yang mencegah duplikasi dan mencatat fluktuasi perubahan nilai data (misalnya riwayat harga).
 
 ---
 
@@ -54,33 +59,33 @@ Codebase Anda mengadopsi standar software engineering tingkat lanjut:
 
 ```text
 Crawl4AI/
-├── targets/                      # 📁 Definisi website target (YAML)
-│   ├── _template.yaml            # Blueprint untuk target baru (diabaikan loader)
-│   ├── books_toscrape.yaml       # Target 1: Toko Buku
-│   ├── ecommerce_demo.yaml       # Target 2: Katalog Laptop
-│   └── job.yaml                  # Target 3: Lowongan Kerja (Skema Dinamis)
+├── targets/                      # 📁 Definisi target scraping (format YAML)
+│   ├── _template.yaml            # Templat acuan target baru (diabaikan oleh loader)
+│   ├── books_toscrape.yaml       # Target 1: Katalog Buku
+│   ├── ecommerce_demo.yaml       # Target 2: Katalog Perangkat Laptop
+│   └── job.yaml                  # Target 3: Lowongan Pekerjaan (Skema Dinamis)
 │
-├── schemas/                      # 📁 Skema CSS Selector (JSON)
-│   ├── books_toscrape.json       # Aturan ekstraksi buku
-│   ├── ecommerce_demo.json       # Aturan ekstraksi laptop
-│   └── job.json                  # Aturan ekstraksi lowongan kerja
+├── schemas/                      # 📁 Aturan deklaratif ekstraksi CSS (format JSON)
+│   ├── books_toscrape.json       # Selektor CSS untuk katalog buku
+│   ├── ecommerce_demo.json       # Selektor CSS untuk katalog laptop
+│   └── job.json                  # Selektor CSS untuk lowongan pekerjaan
 │
-├── src/                          # 📁 Mesin Inti (Engine Scraper)
-│   ├── config.py                 # Pydantic schema validator untuk YAML target
-│   ├── extract_css.py            # Integrasi Crawl4AI JsonCssExtractionStrategy
-│   ├── validate.py               # Pembersih teks & konversi tipe data (Pydantic)
-│   ├── storage.py                # Abstraksi SQLite (idempotensi, dynamic table, history)
-│   └── runner.py                 # Titik masuk utama (CLI runner & async orchestrator)
+├── src/                          # 📁 Mesin Inti Sistem (Agnostik Target)
+│   ├── config.py                 # Parser & validator konfigurasi YAML (Pydantic)
+│   ├── extract_css.py            # Adaptor Crawl4AI JsonCssExtractionStrategy
+│   ├── validate.py               # Pembersih teks, regex parser, & validasi model
+│   ├── storage.py                # Abstraksi database SQLite (idempotensi, riwayat, tabel dinamis)
+│   └── runner.py                 # CLI entrypoint & async pipeline orchestrator
 │
-├── tests/                        # 📁 Pengujian Otomatis (Offline)
-│   ├── fixtures/                 # File HTML mentah tiruan website asli
-│   ├── test_m1.py                # Unit test fondasi & storage
-│   └── test_m2.py                # Integration test multi-target
+├── tests/                        # 📁 Test Suite Otomatis (100% Offline)
+│   ├── fixtures/                 # Sampel file HTML mentah untuk isolasi tes
+│   ├── test_m1.py                # Unit test fondasi, parsing, & storage
+│   └── test_m2.py                # Integration test multi-target & idempotensi
 │
-├── data/                         # 📁 Lokasi SQLite database (scraper.db)
-├── requirements.txt              # Daftar dependensi (crawl4ai, pydantic, pyyaml, pytest)
+├── data/                         # 📁 Direktori penyimpanan database SQLite (*.db)
+├── requirements.txt              # Daftar dependensi Python teruji
 ├── PRD.md                        # Product Requirements Document
-└── README.md                     # Panduan penggunaan lengkap
+└── README.md                     # Dokumentasi petunjuk penggunaan
 ```
 
 ---
@@ -88,27 +93,26 @@ Crawl4AI/
 ## 3. Bedah File demi File (Deep Dive)
 
 ### A. `targets/*.yaml` (Definisi Target)
-File YAML ini adalah "KTP" dan "Surat Perintah" bagi scraper.
+File konfigurasi deklaratif yang berfungsi sebagai instruksi operasional untuk crawler.
 
-**Contoh (`targets/books_toscrape.yaml`):**
+**Contoh: [`targets/books_toscrape.yaml`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/targets/books_toscrape.yaml)**
 ```yaml
 name: books_toscrape                                      # Identitas unik target
 start_urls:
-  - "https://books.toscrape.com/catalogue/page-1.html"    # URL awal yang dikunjungi
-mode: css                                                 # Mode ekstraksi: "css" atau "llm"
-schema_file: schemas/books_toscrape.json                  # Pasangan file selektornya
-rate_limit_seconds: 1                                     # Jeda antar URL agar sopan
-scroll_full_page: false                                   # Apakah perlu scroll ke bawah?
-max_pages: 1                                              # Batas halaman yang dikikis
+  - "https://books.toscrape.com/catalogue/page-1.html"    # Daftar URL awal
+mode: css                                                 # Strategi ekstraksi ("css" atau "llm")
+schema_file: schemas/books_toscrape.json                  # Rujukan path skema selektor
+rate_limit_seconds: 1                                     # Interval jeda antar-request (detik)
+scroll_full_page: false                                   # Flag pengguliran halaman penuh
+max_pages: 1                                              # Batas kuota halaman yang diproses
 ```
-* **Makna & Perannya**: Memberitahu `runner.py` ke mana harus pergi, seberapa cepat boleh mengambil data, dan file skema mana yang memuat instruksi selektornya.
 
 ---
 
 ### B. `schemas/*.json` (Deklarasi Selektor)
-Crawl4AI memiliki fitur dahsyat bernama `JsonCssExtractionStrategy`. Alih-alih menulis kodingan loop manual, kita cukup memberikan deklarasi JSON yang rapi.
+File skema yang dikonsumsi oleh `JsonCssExtractionStrategy` dari Crawl4AI untuk mengekstrak data dari DOM tanpa kode parsing manual.
 
-**Contoh (`schemas/books_toscrape.json`):**
+**Contoh: [`schemas/books_toscrape.json`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/schemas/books_toscrape.json)**
 ```json
 {
   "name": "books_toscrape_catalog",
@@ -133,27 +137,27 @@ Crawl4AI memiliki fitur dahsyat bernama `JsonCssExtractionStrategy`. Alih-alih m
   ]
 }
 ```
-* **`baseSelector`**: Container utama tiap entitas berulang (misal satu kotak kartu produk).
-* **`fields`**: Atribut yang ingin diambil di dalam kotak tersebut:
-  - `type: "text"`: Mengambil teks di dalam elemen (`inner_text`).
-  - `type: "attribute"`: Mengambil nilai atribut HTML (seperti `title="..."`, `href="..."`, `src="..."`).
+* **`baseSelector`**: Selektor pembungkus entitas berulang (satu kartu/baris item).
+* **`fields`**: Atribut yang diekstrak dari dalam kontainer:
+  - `type: "text"`: Mengambil representasi teks (`innerText`).
+  - `type: "attribute"`: Mengambil nilai atribut HTML tertentu (misalnya atribut `title`, `href`, atau `src`).
 
 ---
 
-### C. `src/config.py` (Validasi Konfigurasi)
-Sebelum program mulai menjelajah web, konfigurasi YAML harus diperiksa agar tidak terjadi error di tengah jalan akibat salah ketik.
+### C. `src/config.py` (Validasi Konfigurasi Target)
+Memastikan file konfigurasi YAML terverifikasi secara struktural sebelum eksekusi dimulai.
 
-**Kunci Kode Utama:**
-- `TargetConfig(BaseModel)`: Memastikan format tipe data benar (misal `rate_limit_seconds` harus angka float $\ge 0$).
-- `@model_validator`: Memvalidasi logika antar-bidang. Jika `mode == "css"`, maka `schema_file` **wajib** ada. Jika tidak ada, sistem langsung melempar error yang jelas sebelum browser dinyalakan.
-- `load_all_targets()`: Otomatis membaca semua file `.yaml` di folder `targets/` dan mengabaikan file yang berawalan `_` (seperti `_template.yaml`).
+**Komponen Utama:**
+- [`TargetConfig`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/config.py#L13-L30): Model Pydantic yang memvalidasi bahwa `rate_limit_seconds` bernilai $\ge 0$ dan `max_pages` bernilai $\ge 1$.
+- `validate_mode_dependencies`: Validator logika internal. Jika konfigurasi menetapkan `mode = "css"`, modul mewajibkan kehadiran parameter `schema_file`.
+- [`load_all_targets`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/config.py#L46-L58): Fungsi penemu target otomatis yang memindai direktori `targets/` dan mengabaikan file prefiks khusus seperti `_template.yaml`.
 
 ---
 
-### D. `src/extract_css.py` (Jantung Integrasi Crawl4AI)
-File ini adalah jembatan antara aplikasi Anda dengan browser Chromium dari Crawl4AI.
+### D. `src/extract_css.py` (Integrasi Crawl4AI)
+Modul antarmuka yang menghubungkan aplikasi dengan engine Crawl4AI.
 
-**Kunci Kode Utama:**
+**Komponen Utama:**
 ```python
 strategy = JsonCssExtractionStrategy(schema=schema_dict)
 run_config = CrawlerRunConfig(
@@ -164,71 +168,238 @@ run_config = CrawlerRunConfig(
 crawl_target = f"raw:{raw_html}" if raw_html is not None else url
 result = await crawler.arun(url=crawl_target, config=run_config)
 ```
-* **`JsonCssExtractionStrategy`**: Memerintahkan Chromium mengeksekusi JavaScript di halaman, menerapkan selektor CSS dari schema JSON, dan langsung mengembalikan string JSON yang rapi.
-* **Trik Sakti `raw:<html_content>`**: Crawl4AI mendukung input HTML lokal dengan prefix `raw:`. Inilah kunci rahasia kenapa scraper ini bisa diuji 100% offline tanpa internet pada unit test!
+- [`load_schema`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L9-L15): Membaca dan mem-parse file JSON selektor.
+- [`extract_with_css`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L17-L56): Mengirimkan URL dan strategi ekstraksi ke `crawler.arun()`. Mendukung protokol offline `raw:<html_content>` untuk pengujian tanpa internet.
 
 ---
 
-### E. `src/validate.py` (Pembersihan & Validasi Data)
-Data dari web itu kotor! Contoh:
-- Harga bisa berupa `"£51.77"`, `" $ 1,234.50"`, atau ada spasi berantakan.
-- Nama produk memiliki newline (`\n`) atau tab.
-- Ada produk kosong/rusak.
+### E. `src/validate.py` (Pembersihan & Validasi Tipe Data)
+Modul transformasi data mentah menjadi objek terstruktur dengan tipe data yang terjamin.
 
-**Kunci Kode Utama:**
-- `ProductRecord(BaseModel)`: Model data resmi untuk produk.
-- `@field_validator("price", mode="before")`: Menggunakan Regex `r"(\d+(?:\.\d+)?)"` untuk mencabut simbol mata uang (`$`, `£`, `Rp`) dan koma ribuan, lalu mengubahnya menjadi angka desimal murni (`float`).
-- `validate_generic()`: Validator dinamis untuk target selain produk (misalnya data lowongan pekerjaan yang berisi `job_name`, `company`, `location`).
+**Komponen Utama:**
+- [`ProductRecord`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/validate.py#L8-L43): Skema model untuk katalog standar.
+- `clean_price`: Validator berbasis Regex (`r"(\d+(?:\.\d+)?)"`) yang mengekstrak angka desimal dari string harga kotor (misalnya `"£51.77"` $\rightarrow$ `51.77`).
+- [`validate_generic`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/validate.py#L66-L98): Sanitizer dinamis untuk target berkonten non-produk (seperti lowongan kerja atau artikel berita).
 
 ---
 
 ### F. `src/storage.py` (Database, Idempotensi & Riwayat Harga)
-File ini mengelola database SQLite (`data/scraper.db`) dengan standar industri.
+Lapisan persistensi database SQLite (`data/scraper.db`) yang mendukung operasi atomik dan pelacakan audit data.
 
-**1. Idempotensi (Anti-Duplikasi Data)**
-Setiap produk diidentifikasi secara unik dengan kombinasi:
-$$\text{Unique Key} = (\text{target}, \text{source\_url}, \text{name})$$
-- Jika data baru $\rightarrow$ `INSERT` ke tabel `products`.
-- Jika data sudah ada dan tidak ada perubahan $\rightarrow$ `action = "unchanged"`, tidak ada data dobel.
+**Komponen Utama:**
+1. **Idempotensi**: Menggunakan aturan integritas unik:
+   $$\text{Unique Key} = (\text{target}, \text{source\_url}, \text{name})$$
+   Jika record identik dikirim ulang, sistem menghasilkan status `"unchanged"` tanpa menulis duplikat.
+2. **Pelacakan Riwayat Harga (*Price History Tracking*)**: Jika harga lama berbeda dengan harga baru ($\Delta > 0.0001$), tabel `products` diperbarui dan entri riwayat baru secara otomatis dicatat ke tabel `price_history`.
+3. **Skema Tabel Dinamis ([`save_generic`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/storage.py#L211-L279))**: Membuat tabel baru secara dinamis serta menambahkan kolom baru via `ALTER TABLE ADD COLUMN` sesuai struktur field JSON yang ditemukan pada target kustom.
 
-**2. Pendeteksi Perubahan & Price History Tracking**
-- Jika produk sudah ada, tetapi harganya berubah (misal dari $50.00$ menjadi $45.00$):
-  - Tabel `products` diperbarui (`UPDATE`).
-  - Catatan baru otomatis dimasukkan ke tabel `price_history` lengkap dengan timestamp `recorded_at`! Ini sangat berharga untuk fitur visualisasi grafik harga.
+---
 
-**3. Skema Dinamis (`save_generic`)**
-Bagaimana jika kita scrape situs lowongan kerja (`job.yaml`) yang kolomnya bukan `name` dan `price`?
-`Storage` secara cerdas membuat tabel baru bernama `job`, lalu jika menemukan field baru, ia otomatis menjalankan:
-```sql
-ALTER TABLE "job" ADD COLUMN "nama_kolom_baru" TEXT;
+### G. `src/runner.py` (CLI Orchestrator Pipeline)
+Orchestrator utama yang mengatur jalannya pipeline secara asinkron.
+
+**Komponen Utama:**
+- Antarmuka CLI berbasis `argparse` (`--target`, `--db`, `--fixture`, `--targets-dir`).
+- Pengendali siklus hidup browser: membuka satu instance [`AsyncWebCrawler`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/runner.py#L158) untuk melayani seluruh antrean URL secara efisien.
+- **Isolasi Kegagalan (*Fault Isolation*)**: Kesalahan atau kegagalan koneksi pada satu target tidak menghentikan eksekusi target lainnya.
+
+---
+
+## 4. Peranan Mendalam Crawl4AI & Transformasi Data Tiap Stage
+
+Crawl4AI memegang peranan sebagai **mesin eksekusi inti (Execution Engine)** yang menangani seluruh kompleksitas browser level rendah (*low-level browser automation*). Berikut adalah rincian mendalam peran Crawl4AI di setiap tahap, dilengkapi data nyata transformasi input-output yang terjadi:
+
 ```
-Anda tidak perlu repot membuat tabel database manual!
+[Target URL / raw:HTML]
+          │
+          ▼  (Stage 1 & 2: Inisialisasi & Navigasi)
+[Headless Chromium DOM Rendering]
+          │
+          ▼  (Stage 3: JsonCssExtractionStrategy)
+[DOM Evaluation via Schema JSON]
+          │
+          ▼  (Stage 4: Serialization)
+[Raw JSON String Output: result.extracted_content]
+          │
+          ▼  (Stage 5: Pydantic Validation & Sanitization)
+[Strongly-typed Data Models: ProductRecord]
+          │
+          ▼  (Stage 6: SQLite Storage)
+[Idempotent DB Insertion & Price History Tracking]
+```
 
 ---
 
-### G. `src/runner.py` (Konduktor / Pipeline Orchestrator)
-Ini adalah "otak pengatur" dan entrypoint CLI yang menghubungkan semua komponen di atas.
-
-**Alur Kerja `runner.py`:**
-1. Menerima argumen terminal (`--target`, `--db`, `--fixture`).
-2. Menyiapkan database (`Storage`).
-3. Membuka sesi asinkron `AsyncWebCrawler()` (hanya satu browser instance dibuka untuk menghemat RAM).
-4. Melakukan loop pada setiap URL di target:
-   - Ambil data via `extract_with_css`.
-   - Validasi via `validate_product` atau `validate_generic`.
-   - Simpan via `storage.save_product` atau `storage.save_generic`.
-   - Terapkan jeda waktu (`rate_limit_seconds`).
-5. **Fault Isolation**: Jika Target A gagal (misal koneksi timeout), Target B tetap berjalan lancar tanpa membuat program crash.
-6. Menampilkan ringkasan eksekusi di terminal.
+### Stage 1: Lifecycle & Inisialisasi Engine Headless
+* **Modul**: [`src/runner.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/runner.py#L158) dan [`src/extract_css.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L34-L38)
+* **Peran Crawl4AI**: 
+  Menginisialisasi engine browser Chromium asinkron berbasis Playwright melalui *asynchronous context manager*. Menyiapkan parameter performa, mode cache (`CacheMode.BYPASS`), dan mekanisme *full page scanning*.
+* **Data Masukan (Input)**:
+  Objek konfigurasi runtime:
+  ```python
+  run_config = CrawlerRunConfig(
+      extraction_strategy=strategy,
+      cache_mode=CacheMode.BYPASS,
+      scan_full_page=False,
+  )
+  ```
+* **Hasil Keluaran (Output)**:
+  Sesi browser aktif (`crawler: AsyncWebCrawler`) yang berjalan di latar belakang dan siap menerima perintah navigasi tanpa overhead inisialisasi berulang.
 
 ---
 
-## 4. Diagram Workflow & Dataflow
+### Stage 2: Navigasi, Evaluasi JavaScript & Rendering Halaman
+* **Modul**: [`src/extract_css.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L41)
+* **Peran Crawl4AI**:
+  Melakukan *network request* ke URL target, memuat seluruh aset dokumen, mengeksekusi skrip JavaScript di sisi klien, menangani DOM dinamis, serta mengonstruksi *rendered DOM tree* utuh pada memori browser.
+* **Data Masukan (Input)**:
+  String URL target:
+  ```text
+  "https://books.toscrape.com/catalogue/page-1.html"
+  ```
+* **Hasil Keluaran (Output)**:
+  DOM Tree yang ter-render sempurna di dalam engine Chromium, memuat representasi HTML terstruktur:
+  ```html
+  <article class="product_pod">
+    <div class="image_container">
+      <a href="a-light-in-the-attic_1000/index.html">
+        <img src="media/cache/2c/da/2cdad67c44b002e7ead0cc35693c0e8b.jpg" alt="A Light in the Attic" class="thumbnail">
+      </a>
+    </div>
+    <h3>
+      <a href="a-light-in-the-attic_1000/index.html" title="A Light in the Attic">A Light in the ...</a>
+    </h3>
+    <div class="product_price">
+      <p class="price_color">£51.77</p>
+      <p class="instock availability">
+        <i class="icon-ok"></i> In stock
+      </p>
+    </div>
+  </article>
+  ```
 
-### Diagram Alur Eksekusi (Workflow Pipeline)
+---
+
+### Stage 3: Ekstraksi Data Deklaratif (`JsonCssExtractionStrategy`)
+* **Modul**: [`src/extract_css.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L33)
+* **Peran Crawl4AI**:
+  Menerjemahkan aturan selektor dari file skema JSON menjadi kode evaluasi DOM internal di dalam browser. Crawl4AI menemukan seluruh kontainer yang sesuai dengan `baseSelector`, mengisolasi lingkup pencarian ke kontainer tersebut, lalu mengekstrak nilai bidang-bidang yang diminta (`text` atau atribut spesifik).
+* **Data Masukan (Input)**:
+  1. DOM Tree hasil render dari Stage 2.
+  2. Kamus skema selektor (dari [`schemas/books_toscrape.json`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/schemas/books_toscrape.json)):
+     ```json
+     {
+       "name": "books_toscrape_catalog",
+       "baseSelector": "article.product_pod",
+       "fields": [
+         {"name": "name", "selector": "h3 a", "type": "attribute", "attribute": "title"},
+         {"name": "price", "selector": "p.price_color", "type": "text"},
+         {"name": "stock", "selector": "p.instock.availability", "type": "text"}
+       ]
+     }
+     ```
+* **Proses yang Terjadi di Browser**:
+  1. Mengumpulkan semua node `article.product_pod` (menemukan 20 elemen kartu buku).
+  2. Pada setiap elemen:
+     - Mencari `h3 a`, membaca nilai atribut `title` $\rightarrow$ `"A Light in the Attic"`
+     - Mencari `p.price_color`, membaca teks node $\rightarrow$ `"£51.77"`
+     - Mencari `p.instock.availability`, membaca teks node $\rightarrow$ `"\n    \n        In stock\n    \n"`
+* **Hasil Keluaran (Output)**:
+  Koleksi data terstruktur in-memory di dalam browser sebelum serialisasi.
+
+---
+
+### Stage 4: Serialisasi Data Mentah & Parsing JSON
+* **Modul**: [`src/extract_css.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/extract_css.py#L43-L53)
+* **Peran Crawl4AI**:
+  Mengonversi kumpulan data elemen dari konteks browser menjadi string JSON valid dan membungkusnya ke dalam objek hasil crawling (`CrawlResult.extracted_content`) lengkap dengan indikator keberhasilan (`CrawlResult.success`).
+* **Data Masukan (Input)**:
+  Node data hasil evaluasi dari Stage 3.
+* **Hasil Keluaran (Output)**:
+  1. Properti `result.extracted_content` bertipe string:
+     ```json
+     "[{\"name\": \"A Light in the Attic\", \"price\": \"£51.77\", \"stock\": \"In stock\"}, {\"name\": \"Tipping the Velvet\", \"price\": \"£53.74\", \"stock\": \"In stock\"}]"
+     ```
+  2. Setelah diparsing melalui `json.loads(extracted_raw)` di baris 48:
+     ```python
+     [
+         {
+             "name": "A Light in the Attic",
+             "price": "£51.77",
+             "stock": "In stock",
+         },
+         {
+             "name": "Tipping the Velvet",
+             "price": "£53.74",
+             "stock": "In stock",
+         },
+     ]
+     ```
+
+---
+
+### Stage 5: Pasca-Crawl4AI — Sanitasi & Pemodelan Data (Pydantic)
+* **Modul**: [`src/validate.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/validate.py#L44-L64)
+* **Peran Sistem**:
+  Data mentah keluaran Crawl4AI masih berupa string dengan simbol mata uang (`£`) dan spasi berlebih. Lapisan validasi membersihkan nilai-nilai ini dan menetapkan tipe data baku.
+* **Data Masukan (Input)**:
+  Satu dictionary mentah dari Stage 4:
+  ```python
+  {"name": "A Light in the Attic", "price": "£51.77", "stock": "In stock"}
+  ```
+* **Proses Transformasi**:
+  1. `clean_name`: Menghilangkan whitespace di awal/akhir dan memastikan nilai tidak kosong.
+  2. `clean_price`: Menjalankan regex `r"(\d+(?:\.\d+)?)"` pada `"£51.77"` $\rightarrow$ menghasilkan nilai numerik `51.77` bertipe `float`.
+  3. Menyuntikkan metadata konteks (`target`, `source_url`, `scraped_at`).
+* **Hasil Keluaran (Output)**:
+  Instance model data [`ProductRecord`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/validate.py#L8-L43):
+  ```python
+  ProductRecord(
+      target="books_toscrape",
+      source_url="https://books.toscrape.com/catalogue/page-1.html",
+      name="A Light in the Attic",
+      price=51.77,
+      stock="In stock",
+      scraped_at=datetime.datetime(2026, 11, 11, 13, 26, 0, tzinfo=timezone.utc),
+  )
+  ```
+
+---
+
+### Stage 6: Pasca-Crawl4AI — Persistensi Idempotent & Price Tracking
+* **Modul**: [`src/storage.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/src/storage.py#L51-L132)
+* **Peran Sistem**:
+  Menerapkan aturan idempotensi dan audit fluktuasi harga ke database SQLite.
+* **Data Masukan (Input)**:
+  Objek `ProductRecord` dari Stage 5.
+* **Logika Penyimpanan**:
+  1. Memeriksa keberadaan data lama melalui query kunci unik:
+     ```sql
+     SELECT id, price, stock FROM products WHERE target = ? AND source_url = ? AND name = ?;
+     ```
+  2. Jika data baru $\rightarrow$ `action = "inserted"`.
+  3. Jika data sudah ada dan harga berubah $\rightarrow$ `action = "updated"`, perbarui tabel `products` dan sisipkan baris baru ke `price_history`.
+  4. Jika data identik $\rightarrow$ `action = "unchanged"`, hanya perbarui timestamp `scraped_at`.
+* **Hasil Keluaran (Output) pada SQLite (`data/scraper.db`)**:
+  
+  **Tabel `products`:**
+  | id | target | source_url | name | price | stock | scraped_at |
+  | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+  | `1` | `books_toscrape` | `https://books.toscrape.com/...` | `A Light in the Attic` | `51.77` | `In stock` | `2026-11-11T13:26:00` |
+
+  **Tabel `price_history`:**
+  | id | product_id | price | stock | recorded_at |
+  | :--- | :--- | :--- | :--- | :--- |
+  | `1` | `1` | `51.77` | `In stock` | `2026-11-11T13:26:00` |
+
+---
+
+## 5. Diagram Arsitektur Workflow & Dataflow
+
+### Diagram Alur Eksekusi (Architecture Workflow)
 ```mermaid
 flowchart TD
-    CLI["Terminal: python -m src.runner --target books_toscrape"] --> Runner["src/runner.py"]
+    CLI["CLI Command: python -m src.runner --target books_toscrape"] --> Runner["src/runner.py"]
     
     subgraph Config Phase
         Runner --> LoadConfig["src/config.py: load_target_config()"]
@@ -237,27 +408,28 @@ flowchart TD
     end
     
     subgraph Browser & Extraction Phase
-        ValidConfig --> Crawler["AsyncWebCrawler (Playwright/Chromium)"]
+        ValidConfig --> Crawler["AsyncWebCrawler Engine"]
         ValidConfig --> SchemaJSON[("schemas/*.json")]
         SchemaJSON --> ExtractCSS["src/extract_css.py: JsonCssExtractionStrategy"]
         Crawler --> ExtractCSS
-        ExtractCSS --> RawJSON["Raw Extracted List of Dicts"]
+        ExtractCSS --> RawJSON["result.extracted_content (Raw JSON String)"]
+        RawJSON --> JSONLoads["json.loads() -> List[Dict]"]
     end
     
     subgraph Validation Phase
-        RawJSON --> Validator["src/validate.py"]
-        Validator -->|Produk| CleanRecord["ProductRecord (Regex Price & Clean Name)"]
-        Validator -->|Custom Target| CleanGeneric["Generic Dict"]
-        Validator -->|Data Rusak| RejectLog["Log Warning & Counter items_invalid"]
+        JSONLoads --> Validator["src/validate.py"]
+        Validator -->|Standar Katalog| CleanRecord["ProductRecord (Clean float price)"]
+        Validator -->|Target Kustom| CleanGeneric["Generic Dict"]
+        Validator -->|Format Rusak| RejectLog["Log Warning & stats['items_invalid'] += 1"]
     end
     
     subgraph Storage Phase
         CleanRecord --> Storage["src/storage.py"]
         CleanGeneric --> Storage
-        Storage -->|Produk Baru| InsertProd["INSERT into products + price_history"]
-        Storage -->|Harga Berubah| UpdateProd["UPDATE products + INSERT price_history"]
-        Storage -->|Data Sama| TouchProd["UPDATE scraped_at only (No Duplicate)"]
-        Storage -->|Custom Target| DynTable["Auto-create Table & Columns"]
+        Storage -->|Record Baru| InsertProd["INSERT products + price_history"]
+        Storage -->|Perubahan Terdeteksi| UpdateProd["UPDATE products + INSERT price_history"]
+        Storage -->|Record Identik| TouchProd["UPDATE scraped_at only (Idempotent)"]
+        Storage -->|Target Kustom| DynTable["Auto-create Table & Columns"]
     end
     
     InsertProd --> DB[("SQLite Database: data/scraper.db")]
@@ -266,131 +438,116 @@ flowchart TD
     DynTable --> DB
 ```
 
-### Diagram Transformasi Data (Dataflow)
+### Diagram Transformasi Data Nyata (Sequence Dataflow)
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Web as Web / HTML Target
-    participant Engine as Crawl4AI (Chromium)
-    participant Val as Validator (Pydantic)
-    participant DB as SQLite Storage
-    
-    Web->>Engine: HTML Mentah: <p class='price'>£51.77</p>
-    Note over Engine: Menggunakan Schema JSON (CSS Selector)
-    Engine->>Val: {"name": "A Light in the Attic", "price": "£51.77", "stock": "In stock"}
-    Note over Val: Pembersihan Regex & Type Casting
-    Val->>DB: ProductRecord(name="A Light in the Attic", price=51.77, stock="In stock")
-    Note over DB: Cek Unique Key (target, source_url, name)
-    alt Produk Baru
-        DB->>DB: INSERT ke 'products' & 'price_history'
-    else Harga Berubah (misal jadi 45.00)
-        DB->>DB: UPDATE 'products' & INSERT riwayat baru ke 'price_history'
-    else Data Sama
-        DB->>DB: Lewati penambahan (Idempotent)
+    participant TargetWeb as Web Server / Fixture
+    participant C4AI as Crawl4AI (Chromium)
+    participant Extractor as src/extract_css.py
+    participant Validator as src/validate.py
+    participant Storage as src/storage.py
+    participant SQLite as SQLite DB
+
+    TargetWeb->>C4AI: Mentransmisikan raw HTML
+    Note over C4AI: Render DOM & Eksekusi JS
+    C4AI->>Extractor: Rendered DOM Tree
+    Note over Extractor: Menerapkan Schema JSON Selektor
+    Extractor->>Validator: List[Dict]: [{"name": "A Light in the Attic", "price": "£51.77", ...}]
+    Note over Validator: Regex Parsing: "£51.77" -> float(51.77)
+    Validator->>Storage: ProductRecord(name="A Light in the Attic", price=51.77, ...)
+    Storage->>SQLite: SELECT id, price FROM products WHERE name = 'A Light in the Attic'
+    alt Belum Ada (Record Baru)
+        Storage->>SQLite: INSERT INTO products VALUES (...)
+        Storage->>SQLite: INSERT INTO price_history VALUES (...)
+    else Ada & Harga Berubah
+        Storage->>SQLite: UPDATE products SET price = 51.77
+        Storage->>SQLite: INSERT INTO price_history VALUES (new_price)
+    else Ada & Tidak Ada Perubahan
+        Storage->>SQLite: UPDATE products SET scraped_at = timestamp
     end
 ```
 
 ---
 
-## 5. Fitur Unggulan "Engineering-Grade" untuk Highlight Video
+## 6. Karakteristik & Fitur Unggulan Sistem
 
-Saat Anda membuat video, pastikan poin-poin ini menjadi sorotan utama karena inilah yang membedakan scraper Anda dengan scraper amatir:
-
-1. **Zero-Code Target Expansion**:
-   * *Tunjukkan di video*: Menambahkan target scraping baru sama sekali tidak perlu menulis kode Python satu baris pun! Cukup buat 1 file YAML dan 1 file JSON skema.
-2. **Headless Browser berbasis Async Playwright**:
-   * Menjelaskan mengapa Crawl4AI sangat cepat dan hemat resource dibandingkan Selenium lama.
-3. **Pembersihan Data Otomatis (Data Cleansing with Pydantic)**:
-   * Mengubah mata uang kotor berkarakter aneh menjadi float bersih menggunakan regex validator.
-4. **Anti-Duplikasi (Idempotensi) & Tracking Riwayat Harga**:
-   * Tunjukkan bahwa jika script dijalankan berulang kali, database tidak akan bengkak dengan data duplikat. Jika harga diskon turun, perubahannya tercatat di tabel `price_history`.
-5. **Dukungan Skema Dinamis**:
-   * Mampu menyimpan data apa saja (buku, lowongan kerja, berita) ke tabel SQLite masing-masing secara otomatis tanpa perlu menulis `CREATE TABLE` manual.
-6. **100% Offline Testability (Unit Testing dengan Fixtures)**:
-   * Tunjukkan cara menjalankan `pytest -v` tanpa kuota internet menggunakan fitur `raw:` HTML fixtures.
+1. **Skalabilitas Tanpa Modifikasi Kode (*Zero-Code Extension*)**:
+   Menambah situs target baru hanya membutuhkan penambahan 1 file konfigurasi YAML pada direktori `targets/` dan 1 file skema selektor pada direktori `schemas/`. Modul pada `src/` tidak perlu diubah.
+2. **Kinerja Asinkron Berbasis Playwright**:
+   Crawl4AI mengontrol browser melalui arsitektur asynchronous `asyncio`. Hal ini memberikan efisiensi resource yang jauh lebih tinggi dibanding otomasi berbasis thread/Selenium konvensional.
+3. **Pembersihan dan Validasi Data Terpusat**:
+   Nilai-nilai string kotor (seperti simbol mata uang, label status stok bertingkat, dan whitespace) dibersihkan secara otomatis menggunakan validator Pydantic dan regex.
+4. **Idempotensi & Pelacakan Audit Nilai**:
+   Pipeline dapat dijalankan berulang tanpa risiko duplikasi baris. Perubahan harga pada produk yang sama otomatis terekam dalam tabel `price_history`.
+5. **Skema Tabel Dinamis untuk Ragam Data**:
+   Mendukung penyimpanan data arbitrer (misalnya lowongan pekerjaan, artikel, atau listing properti) yang otomatis membuat tabel baru dan kolom baru sesuai field yang diekstrak.
+6. **Kemampuan Pengujian 100% Offline**:
+   Memanfaatkan dukungan Crawl4AI untuk string HTML dengan format `raw:<html_content>`, memungkinkan unit test dan integration test berjalan tanpa dependensi koneksi internet.
 
 ---
 
-## 6. Blueprint Struktur Konten Video (Script Outline)
+## 7. Panduan Operasional CLI & Verifikasi Database
 
-Berikut adalah panduan alur video (durasi rekomendasi: **10 - 15 menit**) yang terbukti engaging untuk audiens developer / tech enthusiast:
+### A. Perintah Eksekusi CLI
 
-```
-[00:00 - 01:30] HOOK & PERMASALAHAN UMUM
-  - Buka dengan masalah: "Kebanyakan tutorial web scraping bikin kodingan yang berantakan (spaghetti code), 
-    sekali ganti website langsung bikin file python baru dari awal."
-  - Tampilkan solusi: "Hari ini kita bedah arsitektur scraper modern berbasis Crawl4AI + Python: 
-    Config-driven, anti-duplikat, dan bisa nambah website baru tanpa ngetik Python sama sekali!"
-
-[01:30 - 03:30] KONSEP ARSITEKTUR (Bocoran Rahasia)
-  - Tampilkan diagram Mermaid arsitektur (satu engine, banyak config).
-  - Jelaskan pemisahan peran: targets/ (KTP target), schemas/ (aturan CSS), src/ (mesin).
-
-[03:30 - 06:30] LIVE DEMO: MENJALANKAN SCRAPER & LIHAT DATABASE
-  - Jalankan target live: `python -m src.runner --target books_toscrape`.
-  - Tunjukkan log di terminal: "Extracted 20 items... 20 inserted."
-  - Jalankan kedua kalinya: Tunjukkan "0 inserted, 20 unchanged." (Jelaskan konsep Idempotensi).
-  - Buka database SQLite atau query langsung lewat terminal untuk memamerkan datanya.
-
-[06:30 - 09:30] BEDAH CODEBASE INTI (KODINGANNYA)
-  - config.py: Validasi Pydantic sebelum browser jalan.
-  - extract_css.py: Rahasia Crawl4AI JsonCssExtractionStrategy.
-  - validate.py: Regex pembersih simbol harga mata uang.
-  - storage.py: Cara kerja deteksi perubahan harga dan dynamic table.
-
-[09:30 - 11:30] KEKUATAN CONFIG-DRIVEN: DEMO TARGET KEDUA (JOB SCRAPING)
-  - Tunjukkan `targets/job.yaml` dan `schemas/job.json`.
-  - Jalankan `python -m src.runner --target job --db data/job.db`.
-  - Tunjukkan tabel `job` otomatis terbuat dengan kolom dinamis tanpa menyentuh file `.py`!
-
-[11:30 - 13:00] AUTOMATED TESTING DENGAN OFFLINE FIXTURE
-  - Jalankan `pytest -v`.
-  - Jelaskan fitur `raw:` Crawl4AI yang memungkinkan pengetesan tanpa internet.
-
-[13:00 - SELESAI] KESIMPULAN & CLOSING
-  - Rangkum prinsip clean architecture.
-  - Jangan lupa sebut atribusi Crawl4AI (karya unclecode).
-  - Call to Action: Like, Subscribe, dan repository link di deskripsi.
-```
-
----
-
-## 7. Cheatsheet Perintah Demo & Live Query Database
-
-Simpan perintah-perintah ini untuk dijalankan di terminal saat merekam layar:
-
-### 1. Menjalankan Scraper
 ```powershell
-# Scrape toko buku
+# 1. Menjalankan target spesifik (Books to Scrape)
 python -m src.runner --target books_toscrape
 
-# Scrape katalog e-commerce demo
+# 2. Menjalankan target ecommerce demo
 python -m src.runner --target ecommerce_demo
 
-# Scrape lowongan kerja ke database khusus
+# 3. Menjalankan target dengan output database kustom
 python -m src.runner --target job --db data/job.db
-```
 
-### 2. Memeriksa Isi Database Langsung di Terminal
-```powershell
-# Cek daftar tabel yang ada di scraper.db
-python -c "import sqlite3; conn = sqlite3.connect('data/scraper.db'); print('Tabel:', [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'\").fetchall()])"
+# 4. Menjalankan dalam mode pengujian offline menggunakan file fixture
+python -m src.runner --target ecommerce_demo --fixture tests/fixtures/ecommerce_demo.html
 
-# Menampilkan 5 data produk teratas dalam format JSON rapi
-python -c "import sqlite3, json; conn = sqlite3.connect('data/scraper.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT target, name, price, stock FROM products LIMIT 5')], indent=2))"
-
-# Cek riwayat harga di tabel price_history
-python -c "import sqlite3, json; conn = sqlite3.connect('data/scraper.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT * FROM price_history LIMIT 5')], indent=2))"
-
-# Cek tabel dinamis lowongan kerja (job)
-python -c "import sqlite3, json; conn = sqlite3.connect('data/job.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT job_name, company, location FROM job LIMIT 5')], indent=2))"
-```
-
-### 3. Menjalankan Automated Tests
-```powershell
-pytest -v
+# 5. Menjalankan seluruh target yang terdaftar di direktori targets/
+python -m src.runner
 ```
 
 ---
-*Dokumen ini siap dijadikan pedoman belajar pribadi dan acuan penyusunan naskah video Anda. Sukses untuk pembuatan videonya!* 🚀
 
+### B. Perintah Verifikasi Hasil pada Database SQLite
+
+Berikut kumpulan one-liner Python untuk memeriksa isi database langsung dari terminal:
+
+```powershell
+# 1. Menampilkan daftar tabel yang ada di dalam database
+python -c "import sqlite3; conn = sqlite3.connect('data/scraper.db'); print('Daftar Tabel:', [r[0] for r in conn.execute(\"SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'\").fetchall()])"
+
+# 2. Menampilkan 5 record produk teratas dalam format JSON rapi
+python -c "import sqlite3, json; conn = sqlite3.connect('data/scraper.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT target, name, price, stock FROM products LIMIT 5')], indent=2))"
+
+# 3. Memeriksa catatan riwayat fluktuasi harga (price_history)
+python -c "import sqlite3, json; conn = sqlite3.connect('data/scraper.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT * FROM price_history LIMIT 5')], indent=2))"
+
+# 4. Menampilkan record dari tabel dinamis (misalnya tabel job pada data/job.db)
+python -c "import sqlite3, json; conn = sqlite3.connect('data/job.db'); conn.row_factory = sqlite3.Row; print(json.dumps([dict(r) for r in conn.execute('SELECT job_name, company, location FROM job LIMIT 5')], indent=2))"
+
+# 5. Menampilkan total jumlah baris data
+python -c "import sqlite3; conn = sqlite3.connect('data/scraper.db'); print('Total Produk:', conn.execute('SELECT COUNT(*) FROM products').fetchone()[0])"
+```
+
+---
+
+## 8. Pengujian Otomatis Offline (Automated Testing)
+
+Seluruh test suite dirancang untuk dapat dijalankan secara terisolasi tanpa memerlukan akses internet, memanfaatkan sampel HTML lokal di `tests/fixtures/`:
+
+```powershell
+# Menggunakan virtual environment aktif
+.\.venv\Scripts\python.exe -m pytest -v
+```
+
+Hasil eksekusi test suite memvalidasi:
+- Kemampuan pembacaan dan parsing konfigurasi YAML ([`test_m1.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/tests/test_m1.py)).
+- Ketahanan regex pembersihan data pada Pydantic model.
+- Integritas idempotensi dan pencatatan riwayat harga pada SQLite.
+- Ekstraksi multi-layout dengan skema data seragam ([`test_m2.py`](file:///d:/Fachrur%20Rizhky/Content/Web%20Scraper/Crawl4AI/tests/test_m2.py)).
+- Isolasi kegagalan (*fault tolerance*) saat satu target mengalami kegagalan.
+
+---
+*Dokumentasi ini menjadi referensi teknis arsitektur sistem web scraper berbasis Crawl4AI.*
