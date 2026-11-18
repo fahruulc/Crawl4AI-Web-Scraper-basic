@@ -1,0 +1,16 @@
+{
+  "name": "ecommerce_catalog",
+  "baseSelector": "li[data-products=\"item\"]",
+  "fields": [
+    {
+      "name": "product_name",
+      "selector": "h2.product-name",
+      "type": "text"
+    },
+    {
+      "name": "price",
+      "selector": "span.price",
+      "type": "text"
+    }
+  ]
+}

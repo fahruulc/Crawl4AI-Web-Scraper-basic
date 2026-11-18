@@ -1,0 +1,8 @@
+name: ecommerce
+start_urls:
+  - "https://www.scrapingcourse.com/ecommerce/"
+mode: css
+schema_file: schemas/ecommerce.json
+rate_limit_seconds: 2
+scroll_full_page: false
+max_pages: 1
